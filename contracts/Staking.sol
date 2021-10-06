@@ -11,20 +11,24 @@ contract Staking is Ownable {
 
     constructor(uint256 _supply) {
         poolBalance = ABDKMathQuad.fromUInt(toNanoToken(_supply));
-        dailyReward = ABDKMathQuad.mul(ABDKMathQuad.div(ABDKMathQuad.fromUInt(_supply), ABDKMathQuad.fromUInt(365*4)), fromUInt(10 ** decimals()));
+        initialPoolBalance = toNanoToken(_supply);
+        dailyReward = ABDKMathQuad.mul(ABDKMathQuad.div(ABDKMathQuad.fromUInt(_supply), ABDKMathQuad.fromUInt(365*4)), ABDKMathQuad.fromUInt(10 ** decimals()));
     }
 
     struct Stakeholder {
         address holderAddress;
         bytes16 rewardBalance;
-        bytes16 stake;
+        uint256 stake;
     }
 
     address[] internal stakeHoldersList;
     mapping(address => Stakeholder) stakeHolders;
 
-    bytes16 private poolBalance;
-    bytes16 private dailyReward;
+    uint256 private initialPoolBalance; // Amount of initial NanoTokens value
+    bytes16 private poolBalance; // Amount of left NanoTokens value that is being spread within 4 years
+    bytes16 private dailyReward; // // Amount of fixed value that will be subtracted everyday within 4 years 
+
+    // <================================ INTERNAL FUNCTIONS ================================>
 
     function decimals() internal pure returns(uint8) {
         return 3;
@@ -42,16 +46,19 @@ contract Staking is Ownable {
    }
 
    function addStakeHolder(address _stakeholder) public {
-       (bool _isStakeholder, ) = isStakeHolder(_stakeholder);
-       if(!_isStakeholder) {
+       (bool _isStakeHolder, ) = isStakeHolder(_stakeholder);
+       require(_isStakeHolder == false, "Stake holder with provided address already exists");
+       if(!_isStakeHolder) {
            stakeHolders[_stakeholder].holderAddress = _stakeholder;
            stakeHoldersList.push(_stakeholder);
        }
    }
 
    function removeStakeHolder(address _stakeholder) public {
-       (bool _isStakeholder, uint256 sHolderId) = isStakeHolder(_stakeholder);
-       if(_isStakeholder) {
+       (bool _isStakeHolder, uint256 sHolderId) = isStakeHolder(_stakeholder);
+       require(_isStakeHolder == true, "There is not any stake holder with provided address");
+
+       if(_isStakeHolder) {
            delete stakeHolders[_stakeholder];
            stakeHoldersList[sHolderId] = stakeHoldersList[stakeHoldersList.length - 1];
            stakeHoldersList.pop();
@@ -66,6 +73,15 @@ contract Staking is Ownable {
        return stakeHolders[_stakeholder].stake; //stakes[_stakeholder];
    }
 
+    // <================================ PUBLIC FUNCTIONS ================================>
+
+    function balanceOfPool()
+       public
+       view
+       returns(int256)
+   {
+       return ABDKMathQuad.toInt(poolBalance);
+   }
 
    function totalStakes()
        public
@@ -80,18 +96,28 @@ contract Staking is Ownable {
        return _totalStakes;
    }
 
+    function createStakeMod(address _address, uint256 _stake)
+       public
+   {
+        if(stakeHolders[_address].stake == 0) addStakeHolder(_address);
+        stakeHolders[_address].stake += _stake * (10 ** decimals());
+   }
+
    function createStake(uint256 _stake)
        public
    {
         if(stakeHolders[msg.sender].stake == 0) addStakeHolder(msg.sender);
-        stakeHolders[msg.sender].stake += _stake;
+        stakeHolders[msg.sender].stake += toNanoToken(_stake);
    }
 
    function removeStake(uint256 _stake)
        public
    {
+       (bool _isStakeHolder, ) = isStakeHolder(msg.sender);
+       require(_isStakeHolder == true, "You are not a Stake holder yet. Please add some stakes first");
+       require(stakeHolders[msg.sender].stake >= _stake, "Provided stake value is higher compared to existsing accounts's stake balance");
        stakeHolders[msg.sender].stake -= _stake;
-       if(stakeHolders[msg.sender].stake == 0) removeStakeHolder(msg.sender);
+       if(stakeHolders[msg.sender].stake == 0 && ABDKMathQuad.toUInt(stakeHolders[msg.sender].rewardBalance) == 0) removeStakeHolder(msg.sender);
 
    }
 
@@ -100,7 +126,7 @@ contract Staking is Ownable {
        view
        returns(uint256)
    {
-       return stakeHolders[_stakeholder].rewardBalance;
+       return ABDKMathQuad.toUInt(stakeHolders[_stakeholder].rewardBalance);
    }
 
    function totalRewardBalance()
@@ -108,11 +134,11 @@ contract Staking is Ownable {
        view
        returns(uint256)
    {
-       uint256 _totalRewards = 0;
+       bytes16 _totalRewards;
        for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
-           _totalRewards += stakeHolders[stakeHoldersList[s]].rewardBalance;
+           _totalRewards = ABDKMathQuad.add(_totalRewards, stakeHolders[stakeHoldersList[s]].rewardBalance);
        }
-       return _totalRewards;
+       return ABDKMathQuad.toUInt(_totalRewards);
    }
 
     function calculateReward(address _stakeholder)
@@ -121,39 +147,44 @@ contract Staking is Ownable {
        returns(bytes16)
    {
        uint256 stakesPool = totalStakes();
-       bytes16 stakePercentage = ABDKMathQuad.mul(ABDKMathQuad.div(ABDKMathQuad.fromUInt(stakeHolders[_stakeholder].stake, ABDKMathQuad.fromUInt(stakePool))), ABDKMathQuad.fromUInt(100));
-        //uint256 stakePercentage = (stakeHolders[_stakeholder].stake / stakesPool) * 100;
+       uint256 stakeHolderStake = stakeHolders[_stakeholder].stake;
+       if(stakeHolderStake == 0) return ABDKMathQuad.fromInt(0);
+       bytes16 stakePercentage = ABDKMathQuad.mul(ABDKMathQuad.div(ABDKMathQuad.fromUInt(stakeHolderStake), ABDKMathQuad.fromUInt(stakesPool)), ABDKMathQuad.fromUInt(100));
         
         return ABDKMathQuad.div(ABDKMathQuad.mul(dailyReward, stakePercentage) , ABDKMathQuad.fromUInt(100));
-        //return (dailyReward * stakePercentage) / 100;
    }
 
-/*
-   function calculateReward(address _stakeholder)
-       public
-       view
-       returns(uint256)
-   {
-       uint256 stakesPool = totalStakes();
-        uint256 stakePercentage = (stakeHolders[_stakeholder].stake / stakesPool) * 100;
-        
-        return (dailyReward * stakePercentage) / 100;
-   }
-*/
-   function distributeRewards()
-       public
-       onlyOwner
-   {
-       for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
-           address stakeholder = stakeHoldersList[s];
-           bytes16 reward = calculateReward(stakeholder);// NEEDS TO BE CHANGED
-           stakeHolders[stakeholder].rewardBalance += reward;
-       }
-   }
+    function getDailyReward() public view returns(uint256) {
+        return ABDKMathQuad.toUInt(dailyReward);
+    }
 
-   function withdrawReward()
-       public
-   {
-       stakeHolders[msg.sender].rewardBalance = 0;
-   }
+    function distributeRewards()
+        public
+        onlyOwner
+    {
+        for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
+            address _stakeholder = stakeHoldersList[s];
+            bytes16 reward = calculateReward(_stakeholder);
+            poolBalance = ABDKMathQuad.sub(poolBalance, reward);
+
+            
+            if(s == stakeHoldersList.length - 1) {
+                stakeHolders[_stakeholder].rewardBalance = ABDKMathQuad.add(reward, stakeHolders[_stakeholder].rewardBalance);
+                uint256 totalRewards = totalRewardBalance();
+                if(totalRewards < initialPoolBalance && (initialPoolBalance-totalRewards) < ABDKMathQuad.toUInt(reward)) {
+                    uint256 remainder = initialPoolBalance - totalRewards;
+                    stakeHolders[_stakeholder].rewardBalance = ABDKMathQuad.add(ABDKMathQuad.fromUInt(remainder), stakeHolders[_stakeholder].rewardBalance);
+                }
+                break;
+            }
+            
+            stakeHolders[_stakeholder].rewardBalance = ABDKMathQuad.add(reward, stakeHolders[_stakeholder].rewardBalance);
+        }
+    }
+
+    function withdrawReward()
+        public
+    {
+        stakeHolders[msg.sender].rewardBalance = 0;
+    }
 }
