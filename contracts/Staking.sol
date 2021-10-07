@@ -19,6 +19,7 @@ contract Staking is Ownable {
     ERC20 public ERC20Interface = ERC20(0xb6710572A14cEa1dc95dff07a292d2fe7c223700);
 
     constructor(uint256 _supply) {
+        isConfigured = false;
         poolBalance = ABDKMathQuad.fromUInt(_supply);
         initialPoolBalance = _supply;
         dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(_supply), ABDKMathQuad.fromUInt(10));
@@ -31,7 +32,7 @@ contract Staking is Ownable {
     }
 
     address[] internal stakeHoldersList;
-    //uint256 usersBeforeNewDay; //Number of users that were before the next reward distribution
+    bool isConfigured;
     mapping (address => bytes16) stakeHolderDailyRewards;
     mapping(address => Stakeholder) stakeHolders;
 
@@ -114,7 +115,9 @@ contract Staking is Ownable {
 
     function transferTokensToContract() public
     {
+        require(isConfigured == false, "Staking contract has already been configured");
         ERC20Interface.transferFrom(msg.sender, address(this), initialPoolBalance);
+        isConfigured = true;
     }
 
    function isStakeHolder(address _address) public view returns(bool, uint256) {
@@ -149,6 +152,7 @@ contract Staking is Ownable {
    function createStake(uint256 _stake)
        public
    {
+        require(isConfigured == true, "Staking contract is not yet configured. Please add some tokens to contract's balance");
         require(msg.sender != address(0), "No zero address is allowed");
         require(_stake >= toNanoToken(10000), "Minimal stake value is 10 000 euphoria tokens");
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. System does not accept any new stakes");
@@ -171,6 +175,18 @@ contract Staking is Ownable {
         return ABDKMathQuad.toUInt(poolBalance);
     }
 
+    function getTotalStakes() public view returns(uint256) {
+        uint256 _totalStakes;
+        for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
+            _totalStakes += stakeHolders[stakeHoldersList[s]].stake;
+        }
+        return ABDKMathQuad.toUInt(dailyReward);
+    }
+
+    function getStakeOf(address _stakeHolder) public view returns(uint256) {
+        return stakeHolders[_stakeHolder].stake;
+    }
+
     function getDailyReward() public view returns(uint256) {
         return ABDKMathQuad.toUInt(dailyReward);
     }
@@ -179,6 +195,7 @@ contract Staking is Ownable {
         public
         onlyOwner
     {
+        require(isConfigured == true, "Staking contract is not yet configured. Please add some tokens to contract's balance");
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. Can't distribute rewards");
         calculateRewards();
 
@@ -208,10 +225,16 @@ contract Staking is Ownable {
     function unStake()
         public
     {
+        require(isConfigured == true, "Staking contract is not yet configured. Please add some tokens to contract's balance");
         require(stakeHolders[msg.sender].holderAddress != address(0), "This user must be a stake holder");
         uint256 reward = ABDKMathQuad.toUInt(stakeHolders[msg.sender].balance);
         require(reward > 0, "User does not have any tokens in his balance");
-        ERC20Interface.transfer(msg.sender, reward);
+        if(stakeHoldersList.length == 1 && getPoolBalance() == 0) {
+            ERC20Interface.transfer(msg.sender, balanceOfContract());    
+        } else {
+            ERC20Interface.transfer(msg.sender, reward);
+        }
+        
         removeStakeHolder(msg.sender);
     }
 }
