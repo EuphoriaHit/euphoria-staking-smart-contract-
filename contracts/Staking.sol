@@ -196,7 +196,8 @@ contract Staking is Ownable {
         onlyOwner
     {
         require(isConfigured == true, "Staking contract is not yet configured. Please add some tokens to contract's balance");
-        require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. Can't distribute rewards");
+        require(stakeHoldersList.length != 0, "There are currently no stake holders. Cannot distribute rewards");
+        require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. Cannot distribute rewards");
         calculateRewards();
 
         for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
