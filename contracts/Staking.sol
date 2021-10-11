@@ -16,76 +16,40 @@ interface ERC20 {
 contract Staking is Ownable {
     using ABDKMathQuad for *;
 
-    ERC20 public ERC20Interface = ERC20(0x741017087F547ac32ece5431d2C2E418d126e80D);
+    ERC20 public ERC20Interface = ERC20(0xb6710572A14cEa1dc95dff07a292d2fe7c223700);
 
     constructor(uint256 _supply) {
         poolBalance = ABDKMathQuad.fromUInt(_supply);
         initialPoolBalance = _supply;
+        dailyReward = dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(initialPoolBalance), ABDKMathQuad.fromUInt(1460));
     }
 
     struct Stakeholder {
         address holderAddress;
         bytes16 balance;
-        uint256 stake;
     }
 
-    //bool isConfigured;
-    //mapping (address => bytes16) stakeHolderDailyRewards;
+    bytes16 private dailyReward;
     bytes16 private poolBalance; // Amount of left NanoTokens value that is being spread within 4 years
     uint256 private initialPoolBalance; // Amount of initial NanoTokens value
     mapping(address => Stakeholder) stakeHolders;
     address[] internal stakeHoldersList;
-    //bytes16 private dailyReward; // // Amount of fixed value that will be subtracted everyday within 4 years 
 
     // <================================ INTERNAL FUNCTIONS ================================>
 
-    function decimals() public pure returns(uint8) {
-        return 3;
-    }
-
-    function toNanoToken(uint256 token) public pure returns(uint256) {
-        return token * (10 ** decimals());
-    }
-
-
-    function calculateReward(address _stakeHolder, bytes16 sumOfBalances, bytes16 dailyReward)
+    function calculateReward(bytes16 stakeHolderBalance, bytes16 sumOfBalances, bytes16 localDailyReward)
     internal
-    view
+    pure
     returns(bytes16)
     {
-        
-        bytes16 stakeHolderBalance = stakeHolders[_stakeHolder].balance;
-        if(stakeHolderBalance == bytes16(0)) return ABDKMathQuad.fromInt(0);
-        bytes16 stakePercentage = ABDKMathQuad.mul(ABDKMathQuad.div(stakeHolderBalance, sumOfBalances), ABDKMathQuad.fromUInt(100));
+        bytes16 oneHunderd = ABDKMathQuad.fromUInt(100);
+        if(stakeHolderBalance == bytes16(0)) return 0;
+        bytes16 stakePercentage = ABDKMathQuad.mul(ABDKMathQuad.div(stakeHolderBalance, sumOfBalances), oneHunderd);
 
-        return ABDKMathQuad.div(ABDKMathQuad.mul(dailyReward, stakePercentage) , ABDKMathQuad.fromUInt(100));
+        return ABDKMathQuad.div(ABDKMathQuad.mul(localDailyReward, stakePercentage) , oneHunderd);
     }
 
-/*
-    function calculateRewards()
-    internal
-    {
-        bytes16 stakeHoldersTotalBalance = totalStakeHolderBalanceBytes();
-
-        for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
-            address _stakeHolder = stakeHoldersList[s];
-            bytes16 stakeHolderBalance = stakeHolders[_stakeHolder].balance;
-            //if(stakeHolderStake == 0) return ABDKMathQuad.fromInt(0);
-            bytes16 stakePercentage = ABDKMathQuad.mul(ABDKMathQuad.div(stakeHolderBalance, stakeHoldersTotalBalance), ABDKMathQuad.fromUInt(100));
-            stakeHolderDailyRewards[_stakeHolder] = ABDKMathQuad.div(ABDKMathQuad.mul(dailyReward, stakePercentage) , ABDKMathQuad.fromUInt(100));
-        }
-    }
-*/
-
-    function stakeHolderBalanceOf(address _stakeholder)
-       public
-       view
-       returns(uint256)
-   {
-       return ABDKMathQuad.toUInt(stakeHolders[_stakeholder].balance);
-   }
-
-    function totalStakeHolderBalancesBytes()
+    function totalStakeHolderBalances()
        internal
        view
        returns(bytes16)
@@ -97,29 +61,33 @@ contract Staking is Ownable {
        return _totalRewards;
    }
 
-   function totalStakeHolderBalances()
-       public
-       view
-       returns(uint256)
-   {
-       bytes16 _totalRewards;
-       for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
-           _totalRewards = ABDKMathQuad.add(_totalRewards, stakeHolders[stakeHoldersList[s]].balance);
-       }
-       return ABDKMathQuad.toUInt(_totalRewards);
-   }
-
     // <================================ PUBLIC FUNCTIONS ================================>
+
+    function decimals() public pure returns(uint8) {
+        return 3;
+    }
+
+    function toNanoToken(uint256 token) public pure returns(uint256) {
+        return token * (10 ** decimals());
+    }
+
+    function stakeHolderBalanceOf(address _stakeholder)
+        public
+        view
+        returns(uint256)
+    {
+        return ABDKMathQuad.toUInt(stakeHolders[_stakeholder].balance);
+    }
 
     function transferTokensToContract() public onlyOwner
     {
-        //require(initialPoolBalance != 0, "Staking contract has already been configured");
         ERC20Interface.transferFrom(msg.sender, address(this), initialPoolBalance);
     }
 
    function isStakeHolder(address _address) public view returns(bool, uint256) {
+       address[] memory localStakeHoldersList = stakeHoldersList;
        for(uint256 sHolderId = 0; sHolderId < stakeHoldersList.length; sHolderId++) {
-           if(_address == stakeHoldersList[sHolderId]) return (true, sHolderId);
+           if(_address == localStakeHoldersList[sHolderId]) return (true, sHolderId);
        }
        return (false, 0);
    }
@@ -154,8 +122,6 @@ contract Staking is Ownable {
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. System does not accept any new stakes");
         if(stakeHolders[msg.sender].balance == ABDKMathQuad.fromUInt(0)) addStakeHolder(msg.sender);
         ERC20Interface.transferFrom(msg.sender, address(this), _stake);
-        stakeHolders[msg.sender].stake += _stake;
-        //poolBalance = ABDKMathQuad.add(poolBalance, ABDKMathQuad.fromUInt(_stake));
         stakeHolders[msg.sender].balance = ABDKMathQuad.add(stakeHolders[msg.sender].balance, ABDKMathQuad.fromUInt(_stake));
    }
 
@@ -171,22 +137,6 @@ contract Staking is Ownable {
         return ABDKMathQuad.toUInt(poolBalance);
     }
 
-    function getTotalStakes() public view returns(uint256) {
-        uint256 _totalStakes;
-        for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
-            _totalStakes += stakeHolders[stakeHoldersList[s]].stake;
-        }
-        return _totalStakes;
-    }
-
-    function getStakeOf(address _stakeHolder) public view returns(uint256) {
-        return stakeHolders[_stakeHolder].stake;
-    }
-
-    function getDailyReward() public view returns(uint256) {
-        return initialPoolBalance / 10;
-    }
-
     function distributeRewards()
         public
         onlyOwner
@@ -194,29 +144,29 @@ contract Staking is Ownable {
         require(stakeHoldersList.length != 0, "There are currently no stake holders. Cannot distribute rewards");
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. Cannot distribute rewards");
 
-        bytes16 sumOfBalances = totalStakeHolderBalancesBytes();
-        bytes16 dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(initialPoolBalance), ABDKMathQuad.fromUInt(10));
+        bytes16 sumOfBalances = totalStakeHolderBalances();
+        bytes16 localDailyReward = dailyReward;
 
         for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
             address _stakeHolder = stakeHoldersList[s];
-            bytes16 reward = calculateReward(_stakeHolder, sumOfBalances, dailyReward);
-
-            poolBalance = ABDKMathQuad.sub(poolBalance, reward);
+            bytes16 localStakeHolderBalance = stakeHolders[_stakeHolder].balance;
+            bytes16 reward = calculateReward(localStakeHolderBalance, sumOfBalances, localDailyReward);
             
-            if(s == stakeHoldersList.length - 1) {
-                stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, stakeHolders[_stakeHolder].balance);
-                uint256 totalBalance = totalStakeHolderBalances();
+            if(s == stakeHoldersList.length-1) {
+                stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, localStakeHolderBalance);
+                uint256 totalBalance = ABDKMathQuad.toUInt(sumOfBalances);
                 if(totalBalance < initialPoolBalance && (initialPoolBalance-totalBalance) < ABDKMathQuad.toUInt(reward)) {
                     uint256 remainder = initialPoolBalance - totalBalance;
-                    stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(ABDKMathQuad.fromUInt(remainder), stakeHolders[_stakeHolder].balance);
-                    poolBalance = ABDKMathQuad.fromUInt(0);
+                    stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(ABDKMathQuad.fromUInt(remainder), localStakeHolderBalance);
+                    poolBalance = 0;
                 }
                 break;
             }
             
-            stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, stakeHolders[_stakeHolder].balance);
+            stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, localStakeHolderBalance);
         }
-
+        
+        poolBalance = ABDKMathQuad.sub(poolBalance, dailyReward);
     }
 
     function unStake()
