@@ -16,13 +16,11 @@ interface ERC20 {
 contract Staking is Ownable {
     using ABDKMathQuad for *;
 
-    ERC20 public ERC20Interface = ERC20(0xb6710572A14cEa1dc95dff07a292d2fe7c223700);
+    ERC20 public ERC20Interface = ERC20(0x741017087F547ac32ece5431d2C2E418d126e80D);
 
     constructor(uint256 _supply) {
-        isConfigured = false;
         poolBalance = ABDKMathQuad.fromUInt(_supply);
         initialPoolBalance = _supply;
-        dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(_supply), ABDKMathQuad.fromUInt(10));
     }
 
     struct Stakeholder {
@@ -31,14 +29,13 @@ contract Staking is Ownable {
         uint256 stake;
     }
 
-    address[] internal stakeHoldersList;
-    bool isConfigured;
-    mapping (address => bytes16) stakeHolderDailyRewards;
-    mapping(address => Stakeholder) stakeHolders;
-
-    uint256 private initialPoolBalance; // Amount of initial NanoTokens value
+    //bool isConfigured;
+    //mapping (address => bytes16) stakeHolderDailyRewards;
     bytes16 private poolBalance; // Amount of left NanoTokens value that is being spread within 4 years
-    bytes16 private dailyReward; // // Amount of fixed value that will be subtracted everyday within 4 years 
+    uint256 private initialPoolBalance; // Amount of initial NanoTokens value
+    mapping(address => Stakeholder) stakeHolders;
+    address[] internal stakeHoldersList;
+    //bytes16 private dailyReward; // // Amount of fixed value that will be subtracted everyday within 4 years 
 
     // <================================ INTERNAL FUNCTIONS ================================>
 
@@ -50,21 +47,21 @@ contract Staking is Ownable {
         return token * (10 ** decimals());
     }
 
-/*
-    function calculateReward(address _stakeholder)
+
+    function calculateReward(address _stakeHolder, bytes16 sumOfBalances, bytes16 dailyReward)
     internal
     view
     returns(bytes16)
     {
-        uint256 stakesPool = totalStakes();
-        uint256 stakeHolderStake = stakeHolders[_stakeholder].stake;
-        if(stakeHolderStake == 0) return ABDKMathQuad.fromInt(0);
-        bytes16 stakePercentage = ABDKMathQuad.mul(ABDKMathQuad.div(ABDKMathQuad.fromUInt(stakeHolderStake), ABDKMathQuad.fromUInt(stakesPool)), ABDKMathQuad.fromUInt(100));
+        
+        bytes16 stakeHolderBalance = stakeHolders[_stakeHolder].balance;
+        if(stakeHolderBalance == bytes16(0)) return ABDKMathQuad.fromInt(0);
+        bytes16 stakePercentage = ABDKMathQuad.mul(ABDKMathQuad.div(stakeHolderBalance, sumOfBalances), ABDKMathQuad.fromUInt(100));
 
         return ABDKMathQuad.div(ABDKMathQuad.mul(dailyReward, stakePercentage) , ABDKMathQuad.fromUInt(100));
     }
-*/
 
+/*
     function calculateRewards()
     internal
     {
@@ -78,6 +75,7 @@ contract Staking is Ownable {
             stakeHolderDailyRewards[_stakeHolder] = ABDKMathQuad.div(ABDKMathQuad.mul(dailyReward, stakePercentage) , ABDKMathQuad.fromUInt(100));
         }
     }
+*/
 
     function stakeHolderBalanceOf(address _stakeholder)
        public
@@ -87,7 +85,7 @@ contract Staking is Ownable {
        return ABDKMathQuad.toUInt(stakeHolders[_stakeholder].balance);
    }
 
-    function totalStakeHolderBalanceBytes()
+    function totalStakeHolderBalancesBytes()
        internal
        view
        returns(bytes16)
@@ -99,7 +97,7 @@ contract Staking is Ownable {
        return _totalRewards;
    }
 
-   function totalStakeHolderBalance()
+   function totalStakeHolderBalances()
        public
        view
        returns(uint256)
@@ -113,11 +111,10 @@ contract Staking is Ownable {
 
     // <================================ PUBLIC FUNCTIONS ================================>
 
-    function transferTokensToContract() public
+    function transferTokensToContract() public onlyOwner
     {
-        require(isConfigured == false, "Staking contract has already been configured");
+        //require(initialPoolBalance != 0, "Staking contract has already been configured");
         ERC20Interface.transferFrom(msg.sender, address(this), initialPoolBalance);
-        isConfigured = true;
     }
 
    function isStakeHolder(address _address) public view returns(bool, uint256) {
@@ -152,7 +149,6 @@ contract Staking is Ownable {
    function createStake(uint256 _stake)
        public
    {
-        require(isConfigured == true, "Staking contract is not yet configured. Please add some tokens to contract's balance");
         require(msg.sender != address(0), "No zero address is allowed");
         require(_stake >= toNanoToken(10000), "Minimal stake value is 10 000 euphoria tokens");
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. System does not accept any new stakes");
@@ -180,7 +176,7 @@ contract Staking is Ownable {
         for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
             _totalStakes += stakeHolders[stakeHoldersList[s]].stake;
         }
-        return ABDKMathQuad.toUInt(dailyReward);
+        return _totalStakes;
     }
 
     function getStakeOf(address _stakeHolder) public view returns(uint256) {
@@ -188,29 +184,28 @@ contract Staking is Ownable {
     }
 
     function getDailyReward() public view returns(uint256) {
-        return ABDKMathQuad.toUInt(dailyReward);
+        return initialPoolBalance / 10;
     }
 
     function distributeRewards()
         public
         onlyOwner
     {
-        require(isConfigured == true, "Staking contract is not yet configured. Please add some tokens to contract's balance");
         require(stakeHoldersList.length != 0, "There are currently no stake holders. Cannot distribute rewards");
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. Cannot distribute rewards");
-        calculateRewards();
+
+        bytes16 sumOfBalances = totalStakeHolderBalancesBytes();
+        bytes16 dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(initialPoolBalance), ABDKMathQuad.fromUInt(10));
 
         for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
             address _stakeHolder = stakeHoldersList[s];
-            bytes16 reward;
-            
-            reward = stakeHolderDailyRewards[_stakeHolder];
+            bytes16 reward = calculateReward(_stakeHolder, sumOfBalances, dailyReward);
 
             poolBalance = ABDKMathQuad.sub(poolBalance, reward);
             
             if(s == stakeHoldersList.length - 1) {
                 stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, stakeHolders[_stakeHolder].balance);
-                uint256 totalBalance = totalStakeHolderBalance();
+                uint256 totalBalance = totalStakeHolderBalances();
                 if(totalBalance < initialPoolBalance && (initialPoolBalance-totalBalance) < ABDKMathQuad.toUInt(reward)) {
                     uint256 remainder = initialPoolBalance - totalBalance;
                     stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(ABDKMathQuad.fromUInt(remainder), stakeHolders[_stakeHolder].balance);
@@ -221,21 +216,24 @@ contract Staking is Ownable {
             
             stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, stakeHolders[_stakeHolder].balance);
         }
+
     }
 
     function unStake()
         public
     {
-        require(isConfigured == true, "Staking contract is not yet configured. Please add some tokens to contract's balance");
         require(stakeHolders[msg.sender].holderAddress != address(0), "This user must be a stake holder");
         uint256 reward = ABDKMathQuad.toUInt(stakeHolders[msg.sender].balance);
         require(reward > 0, "User does not have any tokens in his balance");
-        if(stakeHoldersList.length == 1 && getPoolBalance() == 0) {
-            ERC20Interface.transfer(msg.sender, balanceOfContract());    
-        } else {
-            ERC20Interface.transfer(msg.sender, reward);
+        if(stakeHoldersList.length == 1) {
+            if(getPoolBalance() == 0){ 
+                ERC20Interface.transfer(msg.sender, balanceOfContract());
+                removeStakeHolder(msg.sender);
+                return;
+            }
         }
-        
+
+        ERC20Interface.transfer(msg.sender, reward);
         removeStakeHolder(msg.sender);
     }
 }
