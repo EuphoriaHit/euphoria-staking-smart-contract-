@@ -29,8 +29,8 @@ contract Staking is Ownable {
         bytes16 balance;
     }
 
-    bytes16 private dailyReward;
-    bytes16 private poolBalance; // Amount of left NanoTokens value that is being spread within 4 years
+    bytes16 private dailyReward; // Daily rewards amount in NanoTokens value
+    bytes16 private poolBalance; // Amount of left NanoTokens value that is being spread within 4 years.
     uint256 private initialPoolBalance; // Amount of initial NanoTokens value
     mapping(address => Stakeholder) stakeHolders;
     address[] internal stakeHoldersList;
@@ -49,7 +49,7 @@ contract Staking is Ownable {
         return ABDKMathQuad.div(ABDKMathQuad.mul(localDailyReward, stakePercentage) , oneHunderd);
     }
 
-    function totalStakeHolderBalances()
+    function totalStakeHoldersBalance()
        internal
        view
        returns(bytes16)
@@ -120,7 +120,7 @@ contract Staking is Ownable {
         require(msg.sender != address(0), "No zero address is allowed");
         require(_stake >= toNanoToken(10000), "Minimal stake value is 10 000 euphoria tokens");
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. System does not accept any new stakes");
-        if(stakeHolders[msg.sender].balance == ABDKMathQuad.fromUInt(0)) addStakeHolder(msg.sender);
+        if(stakeHolders[msg.sender].balance == 0) addStakeHolder(msg.sender);
         ERC20Interface.transferFrom(msg.sender, address(this), _stake);
         stakeHolders[msg.sender].balance = ABDKMathQuad.add(stakeHolders[msg.sender].balance, ABDKMathQuad.fromUInt(_stake));
    }
@@ -144,7 +144,7 @@ contract Staking is Ownable {
         require(stakeHoldersList.length != 0, "There are currently no stake holders. Cannot distribute rewards");
         require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. Cannot distribute rewards");
 
-        bytes16 sumOfBalances = totalStakeHolderBalances();
+        bytes16 sumOfBalances = totalStakeHoldersBalance();
         bytes16 localDailyReward = dailyReward;
 
         for (uint256 s = 0; s < stakeHoldersList.length; s += 1){
@@ -152,6 +152,8 @@ contract Staking is Ownable {
             bytes16 localStakeHolderBalance = stakeHolders[_stakeHolder].balance;
             bytes16 reward = calculateReward(localStakeHolderBalance, sumOfBalances, localDailyReward);
             
+            //This part checks if the total poolBalance is lower than reward value and then it adds the remaining amount to the last user Address in stakeHoldersList array
+            //This is done in order to completely empty the local poolBalance variable
             if(s == stakeHoldersList.length-1) {
                 stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, localStakeHolderBalance);
                 uint256 totalBalance = ABDKMathQuad.toUInt(sumOfBalances);
@@ -166,7 +168,7 @@ contract Staking is Ownable {
             stakeHolders[_stakeHolder].balance = ABDKMathQuad.add(reward, localStakeHolderBalance);
         }
         
-        poolBalance = ABDKMathQuad.sub(poolBalance, dailyReward);
+        poolBalance = ABDKMathQuad.sub(poolBalance, dailyReward); //Subtract dailyReward from local poolBalance variable
     }
 
     function unStake()
@@ -175,6 +177,7 @@ contract Staking is Ownable {
         require(stakeHolders[msg.sender].holderAddress != address(0), "This user must be a stake holder");
         uint256 reward = ABDKMathQuad.toUInt(stakeHolders[msg.sender].balance);
         require(reward > 0, "User does not have any tokens in his balance");
+        // Check if the pool is Empty and the last left user is trying to withdraw its balance. This check is done in order to completely empty the payable poolBalance of contract
         if(stakeHoldersList.length == 1) {
             if(getPoolBalance() == 0){ 
                 ERC20Interface.transfer(msg.sender, balanceOfContract());
