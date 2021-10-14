@@ -169,7 +169,7 @@ contract Staking is Ownable, Pausable {
         uint256 daysSinceStart = (block.timestamp - startDay) / 86400;
         uint256 reward = calculateFinalReward(msg.sender);
         require(reward > 0, "User does not have any tokens in his balance");
-        totalStakesAtDay[daysSinceStart] = ABDKMathQuad.sub(totalStakesAtDay[stakesChangeDays[stakesChangeDays.length-1]], ABDKMathQuad.fromUInt(stakes[msg.sender]));
+        totalStakesAtDay[daysSinceStart] = ABDKMathQuad.sub(totalStakesAtDay[stakesChangeDays[stakesChangeDays.length-1]], stakes[msg.sender]);
         
         if(stakesChangeDays[stakesChangeDays.length-1] != daysSinceStart) {
             stakesChangeDays.push(daysSinceStart);
