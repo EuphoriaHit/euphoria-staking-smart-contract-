@@ -16,10 +16,11 @@ interface ERC20 {
 contract Staking is Ownable {
     using ABDKMathQuad for *;
 
-    ERC20 public ERC20Interface = ERC20(0xb6710572A14cEa1dc95dff07a292d2fe7c223700);
+    ERC20 private ERC20Interface;
 
-    constructor(uint256 _supply) {
+    constructor(uint256 _supply, address _owner) {
         poolBalance = ABDKMathQuad.fromUInt(_supply);
+        ERC20Interface = ERC20(_owner);
         initialPoolBalance = _supply;
         dailyReward = dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(initialPoolBalance), ABDKMathQuad.fromUInt(1460));
     }
