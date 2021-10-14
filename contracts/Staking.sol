@@ -15,33 +15,52 @@ interface ERC20 {
 
 
 contract Staking is Ownable, Pausable {
+    //This smart contract's reward distribution algorithm was based on this article
+    //https://uploads-ssl.webflow.com/5ad71ffeb79acc67c8bcdaba/5ad8d1193a40977462982470_scalable-reward-distribution-paper.pdf
+
     using ABDKMathQuad for *;
 
     modifier contractExpired() {
-        require((block.timestamp - startDay) / 86400 >= 1460 && stakeHolders.length == 0);
+        require((block.timestamp - startDay) / 86400 > 1460 && totalStakes == 0);
         _;
     }
 
-    constructor(uint256 _supply, address _owner) {
-        ERC20Interface = ERC20(_owner);
-        poolBalance = ABDKMathQuad.fromUInt(_supply);
+    modifier contractNotExpired() {
+        require((block.timestamp - startDay) / 86400 < 1460);
+        _;
+    }
+
+    constructor(uint256 _supply, address _tokenAddress) {
+        ERC20Interface = ERC20(_tokenAddress);
+        poolBalance = _supply;
         initialPoolBalance = _supply;
-        dailyReward = dailyReward = ABDKMathQuad.div(poolBalance, ABDKMathQuad.fromUInt(10));
+        dailyReward = dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(poolBalance), ABDKMathQuad.fromUInt(1460));
         startDay = block.timestamp - (block.timestamp % 86400);
     }
 
     
     ERC20 private ERC20Interface;
-    bytes16 private dailyReward; // dailyReward that will be shared between users based on their overall percentage everyday
-    bytes16 private poolBalance; // Amount of left NanoTokens value that is being spread within 4 years
-    uint256 private initialPoolBalance; // Amount of initial NanoTokens value
-    uint256 private startDay; // Timestamp of date when the smart contract has been deployed
-    mapping(address => bytes16) stakes; // Total amount of stakes of user for the current time
-    mapping(uint256 => bytes16) totalStakesAtDay; // Stores total amount of stakes this contract had on specific day. Used for final calculation
-    mapping(address => mapping(uint256 => bytes16)) stakeHolderStakeAtDay; // Stores exact amount of stakes user had on specific day. Used for final calculation
-    uint256[] internal stakesChangeDays; //This variable holds the number of days when the user's made any interactions. Like createStake or unStake
-    address[] internal stakeHolders;
+    uint256 private initialPoolBalance;
+    uint256 private poolBalance;
+    uint256 private startDay;
+    uint256 private totalStakes; // T value in the Article Paper
+    bytes16 private distributedRewards; // S value in the Article Paper
+    bytes16 private dailyReward; // Amount of tokens that will be distributed among all users in 1 Day 
+    uint256 private lastDay;
+    mapping(address => mapping(uint256 => bytes16)) private distributedRewardsSnapshot; // S0 value in the Article Paper
+    mapping(address => mapping(uint256 => uint256)) private stake; // Keeps record of user's made stakings. Note that every new staking is considered as a seperate stake transaction
+    mapping(address => uint256) private stakesCount;
     
+    // <================================ EVENTS ================================>
+    event stakeCreated(address indexed stakeHolder, uint256 indexed stake);
+
+    event rewardsDistributed(uint256 indexed currentDay);
+
+    event unStaked(address indexed stakeHolder, uint256 withdrawAmount);
+
+    event stakeHolderAdded(address indexed stakeHolder);
+
+    event stakeHolderRemoved(address indexed stakeHolder);
 
     // <================================ INTERNAL FUNCTIONS ================================>
 
@@ -53,6 +72,10 @@ contract Staking is Ownable, Pausable {
         return token * (10 ** decimals());
     }
 
+    function isContractExpired() internal returns(bool) {
+        return ((block.timestamp - startDay) / 86400) > 1460;
+    }
+
     // <================================ PUBLIC FUNCTIONS ================================>
 
     function transferTokensToContract() public onlyOwner whenNotPaused
@@ -60,64 +83,60 @@ contract Staking is Ownable, Pausable {
         ERC20Interface.transferFrom(msg.sender, address(this), initialPoolBalance);
     }
 
-   function isStakeHolder(address _address) public view returns(bool, uint256) {
-       address[] memory localStakeHolders = stakeHolders;
-       for(uint256 sHolderId = 0; sHolderId < stakeHolders.length; sHolderId++) {
-           if(_address == localStakeHolders[sHolderId]) return (true, sHolderId);
+   function isStakeHolder(address _address) public view returns(bool) {
+       if(stake[_address][0] != 0 && stakesCount[_address] != 0) {
+           return true;
        }
-       return (false, 0);
-   }
-
-   function addStakeHolder(address _stakeholder) public {
-       require(_stakeholder != address(0), "No zero address is allowed");
-       (bool _isStakeHolder, ) = isStakeHolder(_stakeholder);
-       require(_isStakeHolder == false, "Stake holder with provided address already exists");
-       if(!_isStakeHolder) {
-           stakeHolders.push(_stakeholder);
-       }
+       return false;
    }
 
    function removeStakeHolder(address _stakeholder) public {
-       require(_stakeholder != address(0), "No zero address is allowed");
-       (bool _isStakeHolder, uint256 sHolderId) = isStakeHolder(_stakeholder);
-       require(_isStakeHolder == true, "There is not any stake holder with provided address");
+       require(_stakeholder != address(0), "Error: No zero address is allowed");
+       bool _isStakeHolder = isStakeHolder(_stakeholder);
+       require(_isStakeHolder == true, "Error: There is not any stake holder with provided address");
 
        if(_isStakeHolder) {
-           delete stakes[_stakeholder];
-           stakeHolders[sHolderId] = stakeHolders[stakeHolders.length - 1];
-           stakeHolders.pop();
+           for(uint i = 0; i < stakesCount[_stakeholder]; i++) {
+               delete stake[_stakeholder][i];
+               delete distributedRewardsSnapshot[_stakeholder][i];
+           }
        }
+
+       emit stakeHolderRemoved(_stakeHolder);
    }
 
    function createStake(uint256 _stake)
        public
        whenNotPaused
+       contractNotExpired
    {
-        uint256 daysSinceStart = (block.timestamp - startDay) / 86400;
-        require(msg.sender != address(0), "No zero address is allowed");
-        require(_stake >= toNanoToken(10000), "Minimal stake value is 10 000 euphoria tokens");
-        require(ABDKMathQuad.toUInt(poolBalance) > 0, "Pool is empty. System does not accept any new stakes");
-        if(stakes[msg.sender] == 0) addStakeHolder(msg.sender);
-        ERC20Interface.transferFrom(msg.sender, address(this), _stake);
-        stakes[msg.sender] += _stake;
-        stakeHolderStakeAtDay[msg.sender][daysSinceStart] = ABDKMathQuad.fromUInt(stakes[msg.sender]);
-        
-        if(stakesChangeDays.length == 0) {
-            stakesChangeDays.push(daysSinceStart);
-            totalStakesAtDay[daysSinceStart] = ABDKMathQuad.fromUInt(_stake);
-            return;    
-        } else if(stakesChangeDays[stakesChangeDays.length-1] != daysSinceStart) {
-            totalStakesAtDay[daysSinceStart] = ABDKMathQuad.add(totalStakesAtDay[stakesChangeDays[stakesChangeDays.length-1]], ABDKMathQuad.fromUInt(_stake));
-            stakesChangeDays.push(daysSinceStart);
-            return;
-        }
-        
-        totalStakesAtDay[daysSinceStart] += _stake;
+        address _stakeHolder = msg.sender;
+        require(_stakeHolder != address(0), "Error: No zero address is allowed");
+        require(_stake >= toNanoToken(10000), "Error: Minimal stake value is 10 000 euphoria tokens");
+        require(poolBalance > 0, "Error: Pool is empty. System does not accept any new stakes");
+        uint256 stakeId = stakesCount[_stakeHolder];
+        ERC20Interface.transferFrom(_stakeHolder, address(this), _stake);
+        stake[_stakeHolder][stakeId] = _stake;
+        distributedRewardsSnapshot[_stakeHolder][stakeId] = distributedRewards;
+       
+        totalStakes += _stake;
+        stakesCount[_stakeHolder] += 1;
+
+        if(isStakeHolder(_stakeHolder)) emit stakeHolderAdded(_stakeHolder);
+        emit stakeCreated(_stakeHolder, _stake);
    }
 
     function balanceOfContract()
+       internal
+       view
+       returns(uint256)
+   {
+       return ERC20Interface.balanceOf(address(this));
+   }
+
+   function getBalanceOfContract()
        public
-       onlyOnwer
+       onlyOwner
        view
        returns(uint256)
    {
@@ -125,56 +144,49 @@ contract Staking is Ownable, Pausable {
    }
 
     function getPoolBalance() public view returns(uint256) {
-        return ABDKMathQuad.toUInt(poolBalance);
+        return poolBalance;
     }
 
     function finalize() public onlyOwner contractExpired {
         selfdestruct(payable(msg.sender));
     }
 
-    function calculateFinalReward(address _stakeHolder)
+    function distributeRewards()
         public
-        returns(uint256)
+        onlyOwner
+        contractNotExpired
     {
-        uint256 daysSinceStart = (block.timestamp - startDay) / 86400;
-        bytes16 finalReward;
-
-        for(uint i = 0; i < stakesChangeDays.length; i++) {
-            uint256 day = stakesChangeDays[i];
-            uint256 daysInARow;
-
-            if(stakesChangeDays.length-1 > i) {
-                daysInARow = stakesChangeDays[i+1] - stakesChangeDays[i];
-            } else if(stakesChangeDays[stakesChangeDays.length-1] < daysSinceStart) {
-                daysInARow = daysSinceStart - stakesChangeDays[stakesChangeDays.length-1];
-            } else {
-                daysInARow = 1;
-            }
-            
-            bytes16 stakePercentage = ABDKMathQuad.div(stakeHolderStakeAtDay[_stakeHolder][day], totalStakesAtDay[day]);
-            finalReward = ABDKMathQuad.add(finalReward, ABDKMathQuad.mul( ABDKMathQuad.mul(dailyReward, stakePercentage), ABDKMathQuad.fromUInt(daysInARow) )) ;
-            delete stakeHolderStakeAtDay[_stakeHolder][day];
+        uint256 currentDay = (block.timestamp - startDay) / 86400;
+        if(lastDay == currentDay) revert("Error: Rewards have already been distributed on this day!");
+        if(totalStakes != 0) {
+            distributedRewards = ABDKMathQuad.add(distributedRewards, ABDKMathQuad.div(dailyReward, ABDKMathQuad.fromUInt(totalStakes)));
+        } else {
+            revert("Error: There are currently no active stakes");
         }
+        lastDay = currentDay;
 
-        poolBalance = ABDKMathQuad.sub(poolBalance, finalReward);
-        
-        return ABDKMathQuad.toUInt(finalReward); //finalReward;
+        emit rewardsDistributed(currentDay);
     }
+
 
     function unStake()
         public
-        returns(uint256)
     {
-        require(stakes[msg.sender] != 0, "This user must be a stake holder");
-        uint256 daysSinceStart = (block.timestamp - startDay) / 86400;
-        uint256 reward = calculateFinalReward(msg.sender);
-        require(reward > 0, "User does not have any tokens in his balance");
-        totalStakesAtDay[daysSinceStart] = ABDKMathQuad.sub(totalStakesAtDay[stakesChangeDays[stakesChangeDays.length-1]], stakes[msg.sender]);
-        
-        if(stakesChangeDays[stakesChangeDays.length-1] != daysSinceStart) {
-            stakesChangeDays.push(daysSinceStart);
+        address _stakeHolder = msg.sender;
+        uint256 userStakesCount = stakesCount[_stakeHolder];
+        uint256 reward;
+        uint256 totalDeposited;
+        require(userStakesCount != 0, "Error: This user must be a stake holder");
+        for(uint i = 0; i < userStakesCount; i++) {
+            uint256 deposited = stake[msg.sender][i];
+            reward += ABDKMathQuad.toUInt(ABDKMathQuad.mul(ABDKMathQuad.fromUInt(deposited), ABDKMathQuad.sub(distributedRewards, distributedRewardsSnapshot[msg.sender][i])));
+            totalDeposited += deposited;
         }
-        removeStakeHolder(msg.sender);
-        return reward;
+        require(reward > 0, "Error: User does not have any tokens in his balance");
+        totalStakes -= totalDeposited;
+        poolBalance -= reward;
+        ERC20Interface.transfer(_stakeHolder, reward + totalDeposited);
+        removeStakeHolder(_stakeHolder);
+        emit unStaked(_stakeHolder, reward + totalDeposited);
     }
 }
