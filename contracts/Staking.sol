@@ -102,7 +102,7 @@ contract Staking is Ownable, Pausable {
            }
        }
 
-       emit stakeHolderRemoved(_stakeHolder);
+       emit stakeHolderRemoved(_stakeholder);
    }
 
    function createStake(uint256 _stake)
