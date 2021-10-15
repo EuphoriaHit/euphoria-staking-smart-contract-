@@ -72,7 +72,7 @@ contract Staking is Ownable, Pausable {
         return token * (10 ** decimals());
     }
 
-    function isContractExpired() internal returns(bool) {
+    function isContractExpired() internal view returns(bool) {
         return ((block.timestamp - startDay) / 86400) > 1460;
     }
 
@@ -100,6 +100,7 @@ contract Staking is Ownable, Pausable {
                delete stake[_stakeholder][i];
                delete distributedRewardsSnapshot[_stakeholder][i];
            }
+           delete stakesCount[_stakeholder];
        }
 
        emit stakeHolderRemoved(_stakeholder);
