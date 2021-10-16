@@ -198,7 +198,7 @@ contract Staking is Ownable, Pausable {
         require(reward > 0, "Error: User does not have any tokens in his balance");
         totalStakes -= totalDeposited;
         if(stakeHoldersCount == 1 && lastDay == contractDurationInDays) {
-            ERC20Interface.transfer(_stakeHolder, getBalanceOfContract());
+            ERC20Interface.transfer(_stakeHolder, balanceOfContract());
         } else {
             ERC20Interface.transfer(_stakeHolder, reward + totalDeposited);
         }
