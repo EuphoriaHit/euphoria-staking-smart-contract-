@@ -49,6 +49,7 @@ contract Staking is Ownable, Pausable {
     bytes16 private distributedRewards; // S value in the Article Paper
     bytes16 private dailyReward; // Amount of tokens that will be distributed among all users in 1 Day 
     uint256 private lastDay;
+    uint256 private stakeHoldersCount;
     mapping(address => mapping(uint256 => bytes16)) private distributedRewardsSnapshot; // S0 value in the Article Paper
     mapping(address => mapping(uint256 => uint256)) private stake; // Keeps record of user's made stakings. Note that every new staking is considered as a seperate stake transaction
     mapping(address => uint256) private stakesCount;
@@ -75,7 +76,10 @@ contract Staking is Ownable, Pausable {
     }
 
     function isContractExpired() internal view returns(bool) {
-        return ((block.timestamp - startDay) / 86400) > 1460;
+        if((block.timestamp - startDay) / 86400 > contractDurationInDays) {
+            return true;
+        }
+        return false;
     }
 
     // <================================ PUBLIC FUNCTIONS ================================>
@@ -103,6 +107,7 @@ contract Staking is Ownable, Pausable {
                delete distributedRewardsSnapshot[_stakeholder][i];
            }
            delete stakesCount[_stakeholder];
+           stakeHoldersCount -= 1;
        }
 
        emit stakeHolderRemoved(_stakeholder);
@@ -116,6 +121,7 @@ contract Staking is Ownable, Pausable {
         address _stakeHolder = msg.sender;
         require(_stakeHolder != address(0), "Error: No zero address is allowed");
         require(_stake >= toNanoToken(10000), "Error: Minimal stake value is 10 000 euphoria tokens");
+        if(!isStakeHolder(_stakeHolder)) stakeHoldersCount += 1;
         uint256 stakeId = stakesCount[_stakeHolder];
         ERC20Interface.transferFrom(_stakeHolder, address(this), _stake);
         stake[_stakeHolder][stakeId] = _stake;
@@ -198,7 +204,11 @@ contract Staking is Ownable, Pausable {
         }
         require(reward > 0, "Error: User does not have any tokens in his balance");
         totalStakes -= totalDeposited;
-        ERC20Interface.transfer(_stakeHolder, reward + totalDeposited);
+        if(stakeHoldersCount == 1 && isContractExpired()) {
+            ERC20Interface.transfer(_stakeHolder, getBalanceOfContract());
+        } else {
+            ERC20Interface.transfer(_stakeHolder, reward + totalDeposited);
+        }
         removeStakeHolder(_stakeHolder);
         emit unStaked(_stakeHolder, reward + totalDeposited);
     }
