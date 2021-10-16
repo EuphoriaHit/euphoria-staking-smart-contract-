@@ -21,27 +21,29 @@ contract Staking is Ownable, Pausable {
     using ABDKMathQuad for *;
 
     modifier contractExpired() {
-        require((block.timestamp - startDay) / 86400 > 1460 && totalStakes == 0);
+        require((block.timestamp - startDay) / 86400 > contractDurationInDays && totalStakes == 0, "Contract is not yet expired");
         _;
     }
 
     modifier contractNotExpired() {
-        require((block.timestamp - startDay) / 86400 < 1460);
+        require((block.timestamp - startDay) / 86400 < contractDurationInDays, "Contract has already expired");
         _;
     }
 
-    constructor(uint256 _supply, address _tokenAddress) {
+    constructor(uint256 _supply, uint256 _durationInDays, address _tokenAddress) {
+        require(_durationInDays > 0, "Duration cannot be zero or negative value");
+        require(_supply > 0, "Supply cannot be zero or negative value");
         ERC20Interface = ERC20(_tokenAddress);
-        poolBalance = _supply;
+        contractDurationInDays = _durationInDays;
         initialPoolBalance = _supply;
-        dailyReward = dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(poolBalance), ABDKMathQuad.fromUInt(1460));
+        dailyReward = dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(initialPoolBalance), ABDKMathQuad.fromUInt(contractDurationInDays));
         startDay = block.timestamp - (block.timestamp % 86400);
     }
 
     
     ERC20 private ERC20Interface;
     uint256 private initialPoolBalance;
-    uint256 private poolBalance;
+    uint256 private contractDurationInDays;
     uint256 private startDay;
     uint256 private totalStakes; // T value in the Article Paper
     bytes16 private distributedRewards; // S value in the Article Paper
@@ -114,7 +116,6 @@ contract Staking is Ownable, Pausable {
         address _stakeHolder = msg.sender;
         require(_stakeHolder != address(0), "Error: No zero address is allowed");
         require(_stake >= toNanoToken(10000), "Error: Minimal stake value is 10 000 euphoria tokens");
-        require(poolBalance > 0, "Error: Pool is empty. System does not accept any new stakes");
         uint256 stakeId = stakesCount[_stakeHolder];
         ERC20Interface.transferFrom(_stakeHolder, address(this), _stake);
         stake[_stakeHolder][stakeId] = _stake;
@@ -135,6 +136,22 @@ contract Staking is Ownable, Pausable {
        return ERC20Interface.balanceOf(address(this));
    }
 
+   function getStartDay()
+        public
+        view
+    returns(uint256)
+    {
+        return startDay;
+    }
+
+    function getContractDuration()
+        public
+        view
+    returns(uint256)
+    {
+        return contractDurationInDays;
+    }
+
    function getBalanceOfContract()
        public
        onlyOwner
@@ -143,10 +160,6 @@ contract Staking is Ownable, Pausable {
    {
        return ERC20Interface.balanceOf(address(this));
    }
-
-    function getPoolBalance() public view returns(uint256) {
-        return poolBalance;
-    }
 
     function finalize() public onlyOwner contractExpired {
         selfdestruct(payable(msg.sender));
@@ -185,7 +198,6 @@ contract Staking is Ownable, Pausable {
         }
         require(reward > 0, "Error: User does not have any tokens in his balance");
         totalStakes -= totalDeposited;
-        poolBalance -= reward;
         ERC20Interface.transfer(_stakeHolder, reward + totalDeposited);
         removeStakeHolder(_stakeHolder);
         emit unStaked(_stakeHolder, reward + totalDeposited);
