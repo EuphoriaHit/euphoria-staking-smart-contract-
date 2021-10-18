@@ -11,6 +11,7 @@ interface ERC20 {
   function approve(address spender, uint value) external returns (bool);
   function transfer(address to, uint value) external returns (bool);
   function transferFrom(address from, address to, uint value) external returns (bool); 
+  function totalSupply() external view returns (uint256);
 }
 
 
@@ -21,22 +22,22 @@ contract Staking is Ownable, Pausable {
     using ABDKMathQuad for *;
 
     modifier contractExpired() {
-        require((block.timestamp - startDay) / 86400 > contractDurationInDays && totalStakes == 0, "Contract is not yet expired");
+        require((block.timestamp - startDay) / 86400 > contractDurationInDays && totalStakes == 0, "Error: Contract is not yet expired");
         _;
     }
 
     modifier contractNotExpired() {
-        require((block.timestamp - startDay) / 86400 < contractDurationInDays, "Contract has already expired");
+        require((block.timestamp - startDay) / 86400 < contractDurationInDays, "Error: Contract has already expired");
         _;
     }
 
-    constructor(uint256 _supply, uint256 _durationInDays, address _tokenAddress) {
-        require(_durationInDays > 0, "Duration cannot be zero or negative value");
-        require(_supply > 0, "Supply cannot be zero or negative value");
+    constructor(uint256 supplyPercentage, uint256 _durationInDays, address _tokenAddress) {
+        require(_durationInDays > 0, "Error: Duration cannot be zero or negative value");
         ERC20Interface = ERC20(_tokenAddress);
         contractDurationInDays = _durationInDays;
-        initialPoolBalance = _supply;
-        dailyReward = dailyReward = ABDKMathQuad.div(ABDKMathQuad.fromUInt(initialPoolBalance), ABDKMathQuad.fromUInt(contractDurationInDays));
+        bytes16 initialPoolBalanceInBytes = ABDKMathQuad.div(ABDKMathQuad.fromUInt(ERC20Interface.totalSupply() * supplyPercentage), ABDKMathQuad.fromUInt(100));
+        initialPoolBalance = ABDKMathQuad.toUInt(initialPoolBalanceInBytes);
+        dailyReward = dailyReward = ABDKMathQuad.div(initialPoolBalanceInBytes, ABDKMathQuad.fromUInt(contractDurationInDays));
         startDay = block.timestamp - (block.timestamp % 86400);
     }
 
@@ -55,41 +56,37 @@ contract Staking is Ownable, Pausable {
     mapping(address => uint256) private stakesCount;
     
     // <================================ EVENTS ================================>
-    event stakeCreated(address indexed stakeHolder, uint256 indexed stake);
+    event StakeCreated(address indexed stakeHolder, uint256 indexed stake);
 
-    event rewardsDistributed(uint256 indexed currentDay);
+    event RewardsDistributed(uint256 indexed currentDay);
 
-    event unStaked(address indexed stakeHolder, uint256 withdrawAmount);
+    event UnStaked(address indexed stakeHolder, uint256 withdrawAmount);
 
-    event stakeHolderAdded(address indexed stakeHolder);
+    event StakeHolderAdded(address indexed stakeHolder);
 
-    event stakeHolderRemoved(address indexed stakeHolder);
+    event StakeHolderRemoved(address indexed stakeHolder);
 
     // <================================ INTERNAL FUNCTIONS ================================>
 
-    function decimals() public pure returns(uint8) {
+    function decimals() internal pure returns(uint8) {
         return 3;
     }
 
-    function toNanoToken(uint256 token) public pure returns(uint256) {
+    function toNanoToken(uint256 token) internal pure returns(uint256) {
         return token * (10 ** decimals());
     }
 
-    // <================================ PUBLIC FUNCTIONS ================================>
-
-    function transferTokensToContract() public onlyOwner whenNotPaused
-    {
-        ERC20Interface.transferFrom(msg.sender, address(this), initialPoolBalance);
-    }
-
-   function isStakeHolder(address _address) public view returns(bool) {
-       if(stake[_address][0] != 0 && stakesCount[_address] != 0) {
-           return true;
-       }
-       return false;
+    function balanceOfContract()
+       internal
+       view
+       returns(uint256)
+   {
+       return ERC20Interface.balanceOf(address(this));
    }
 
-   function removeStakeHolder(address _stakeholder) public {
+    // <================================ PRIVATE FUNCTIONS ================================>
+
+    function removeStakeHolder(address _stakeholder) private {
        require(_stakeholder != address(0), "Error: No zero address is allowed");
        bool _isStakeHolder = isStakeHolder(_stakeholder);
        require(_isStakeHolder == true, "Error: There is not any stake holder with provided address");
@@ -103,7 +100,21 @@ contract Staking is Ownable, Pausable {
            stakeHoldersCount -= 1;
        }
 
-       emit stakeHolderRemoved(_stakeholder);
+       emit StakeHolderRemoved(_stakeholder);
+   }
+
+    // <================================ PUBLIC FUNCTIONS ================================>
+
+    function transferTokensToContract() public onlyOwner whenNotPaused
+    {
+        ERC20Interface.transferFrom(msg.sender, address(this), initialPoolBalance);
+    }
+
+   function isStakeHolder(address _address) public view returns(bool) {
+       if(stake[_address][0] != 0 && stakesCount[_address] != 0) {
+           return true;
+       }
+       return false;
    }
 
    function createStake(uint256 _stake)
@@ -123,16 +134,8 @@ contract Staking is Ownable, Pausable {
         totalStakes += _stake;
         stakesCount[_stakeHolder] += 1;
 
-        if(isStakeHolder(_stakeHolder)) emit stakeHolderAdded(_stakeHolder);
-        emit stakeCreated(_stakeHolder, _stake);
-   }
-
-    function balanceOfContract()
-       internal
-       view
-       returns(uint256)
-   {
-       return ERC20Interface.balanceOf(address(this));
+        if(isStakeHolder(_stakeHolder)) emit StakeHolderAdded(_stakeHolder);
+        emit StakeCreated(_stakeHolder, _stake);
    }
 
    function getStartDay()
@@ -178,9 +181,8 @@ contract Staking is Ownable, Pausable {
         }
         lastDay = currentDay;
 
-        emit rewardsDistributed(currentDay);
+        emit RewardsDistributed(currentDay);
     }
-
 
     function unStake()
         public
@@ -203,6 +205,6 @@ contract Staking is Ownable, Pausable {
             ERC20Interface.transfer(_stakeHolder, reward + totalDeposited);
         }
         removeStakeHolder(_stakeHolder);
-        emit unStaked(_stakeHolder, reward + totalDeposited);
+        emit UnStaked(_stakeHolder, reward + totalDeposited);
     }
 }
