@@ -35,15 +35,15 @@ contract Staking is Ownable, Pausable {
         require(_durationInDays > 0, "Error: Duration cannot be zero or negative value");
         ERC20Interface = ERC20(_tokenAddress);
         contractDurationInDays = _durationInDays;
-        bytes16 initialPoolBalanceInBytes = ABDKMathQuad.div(ABDKMathQuad.fromUInt(ERC20Interface.totalSupply() * supplyPercentage), ABDKMathQuad.fromUInt(100));
-        initialPoolBalance = ABDKMathQuad.toUInt(initialPoolBalanceInBytes);
-        dailyReward = dailyReward = ABDKMathQuad.div(initialPoolBalanceInBytes, ABDKMathQuad.fromUInt(contractDurationInDays));
+        bytes16 initialSupplyInBytes = ABDKMathQuad.div(ABDKMathQuad.fromUInt(ERC20Interface.totalSupply() * supplyPercentage), ABDKMathQuad.fromUInt(100));
+        initialSupply = ABDKMathQuad.toUInt(initialSupplyInBytes);
+        dailyReward = dailyReward = ABDKMathQuad.div(initialSupplyInBytes, ABDKMathQuad.fromUInt(contractDurationInDays));
         startDay = block.timestamp - (block.timestamp % 86400);
     }
 
     
     ERC20 private ERC20Interface;
-    uint256 private initialPoolBalance;
+    uint256 private initialSupply;
     uint256 private contractDurationInDays;
     uint256 private startDay;
     uint256 private totalStakes; // T value in the Article Paper
@@ -107,7 +107,7 @@ contract Staking is Ownable, Pausable {
 
     function transferTokensToContract() public onlyOwner whenNotPaused
     {
-        ERC20Interface.transferFrom(msg.sender, address(this), initialPoolBalance);
+        ERC20Interface.transferFrom(msg.sender, address(this), initialSupply);
     }
 
    function isStakeHolder(address _address) public view returns(bool) {
@@ -138,7 +138,7 @@ contract Staking is Ownable, Pausable {
         emit StakeCreated(_stakeHolder, _stake);
    }
 
-   function getStartDay()
+   function getStartDayOfContract()
         public
         view
     returns(uint256)
@@ -146,7 +146,7 @@ contract Staking is Ownable, Pausable {
         return startDay;
     }
 
-    function getContractDuration()
+    function getDurationOfContract()
         public
         view
     returns(uint256)
