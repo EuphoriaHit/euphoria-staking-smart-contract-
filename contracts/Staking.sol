@@ -104,7 +104,7 @@ contract Staking is Ownable {
 
     // <================================ PUBLIC FUNCTIONS ================================>
 
-    function transferTokensToContract() public onlyOwner whenNotPaused
+    function transferTokensToContract() public onlyOwner
     {
         ERC20Interface.transferFrom(msg.sender, address(this), initialSupply);
     }
@@ -118,7 +118,6 @@ contract Staking is Ownable {
 
    function createStake(uint256 _stake)
        public
-       whenNotPaused
        contractNotExpired
    {
         address _stakeHolder = msg.sender;
