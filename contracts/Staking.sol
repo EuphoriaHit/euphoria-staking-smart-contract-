@@ -30,13 +30,14 @@ contract Staking is Ownable {
         _;
     }
 
-    constructor(uint256 supplyPercentage, uint256 _durationInDays, address _tokenAddress) {
-        require(_durationInDays > 0, "Error: Duration cannot be zero or negative value");
+    constructor(uint256 _supplyPercentage, uint256 _durationInDays, address _tokenAddress) {
+        require(_durationInDays > 0, "Error: Duration cannot be a zero value");
+        require(_supplyPercentage > 0, "Error: Supply percentage cannot be a zero value");
         ERC20Interface = ERC20(_tokenAddress);
         contractDurationInDays = _durationInDays;
-        bytes16 initialSupplyInBytes = ABDKMathQuad.div(ABDKMathQuad.fromUInt(ERC20Interface.totalSupply() * supplyPercentage), ABDKMathQuad.fromUInt(100));
+        bytes16 initialSupplyInBytes = ABDKMathQuad.div(ABDKMathQuad.fromUInt(ERC20Interface.totalSupply() * _supplyPercentage), ABDKMathQuad.fromUInt(100));
         initialSupply = ABDKMathQuad.toUInt(initialSupplyInBytes);
-        dailyReward = dailyReward = ABDKMathQuad.div(initialSupplyInBytes, ABDKMathQuad.fromUInt(contractDurationInDays));
+        dailyReward = ABDKMathQuad.div(initialSupplyInBytes, ABDKMathQuad.fromUInt(contractDurationInDays));
         startDay = block.timestamp - (block.timestamp % 86400);
     }
 
