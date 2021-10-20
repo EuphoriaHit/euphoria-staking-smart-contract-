@@ -3,7 +3,6 @@ pragma solidity ^0.8.9;
 
 import "./Ownable.sol";
 import "./ABDKMathQuad.sol";
-import "./Pausable.sol";
 
 interface ERC20 {
   function balanceOf(address owner) external view returns (uint);
@@ -15,7 +14,7 @@ interface ERC20 {
 }
 
 
-contract Staking is Ownable, Pausable {
+contract Staking is Ownable {
     //This smart contract's reward distribution algorithm was based on this article
     //https://uploads-ssl.webflow.com/5ad71ffeb79acc67c8bcdaba/5ad8d1193a40977462982470_scalable-reward-distribution-paper.pdf
 
